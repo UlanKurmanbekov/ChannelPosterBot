@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import openai
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, \
@@ -26,6 +27,9 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
+scheduler = AsyncIOScheduler()
+scheduler.start()
+
 keyboard = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="Да", callback_data='confirm_yes')],
     [InlineKeyboardButton(text="Нет", callback_data='confirm_no')]
@@ -36,7 +40,26 @@ class Form(StatesGroup):
     awaiting_confirmation = State()
 
 
-sent_media_group_ids = set()
+def media_group_confirmation_closure():
+    sent_media_group_ids = set()
+
+    def is_media_group_processed(media_group_id):
+        if media_group_id in sent_media_group_ids:
+            return True
+        sent_media_group_ids.add(media_group_id)
+        return False
+
+    def clear_media_group_ids():
+        nonlocal sent_media_group_ids
+        sent_media_group_ids.clear()
+        logger.info("Cleared media group IDs")
+
+    return is_media_group_processed, clear_media_group_ids
+
+
+is_media_group_processed, clear_media_group_ids = media_group_confirmation_closure()
+
+scheduler.add_job(clear_media_group_ids, 'interval', days=3)
 
 
 async def start_handler(message: Message):
@@ -44,19 +67,19 @@ async def start_handler(message: Message):
 
 
 async def translate_text(text: str) -> str:
-    # response = client.chat.completions.create(
-    #     model="gpt-4o",
-    #     messages=[
-    #         {"role": "system",
-    #          "content": """
-    #          You are a professional translator. Please translate the following text to Kyrgyz. Ensure
-    #          that the translation is accurate and maintains the original meaning and tone
-    #          """},
-    #         {"role": "user", "content": text}
-    #     ]
-    # )
-    # translation = response.choices[0].message.content.strip()
-    return text
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system",
+             "content": """
+             You are a professional translator. Please translate the following text to Kyrgyz. Ensure
+             that the translation is accurate and maintains the original meaning and tone
+             """},
+            {"role": "user", "content": text}
+        ]
+    )
+    translation = response.choices[0].message.content.strip()
+    return translation
 
 
 async def ask_confirmation(message: Message, state: FSMContext):
@@ -81,8 +104,7 @@ async def ask_confirmation(message: Message, state: FSMContext):
         if message.media_group_id:
             media_group_id = message.media_group_id
 
-            # Проверка, был ли уже отправлен запрос для этой группы медиафайлов
-            if media_group_id in sent_media_group_ids:
+            if is_media_group_processed(media_group_id):
                 return
 
             if not data.get('media_group_id'):
@@ -97,9 +119,6 @@ async def ask_confirmation(message: Message, state: FSMContext):
             await state.update_data(prompt_message_id=prompt_message.message_id, buttons_sent=True)
             await state.set_state(Form.awaiting_confirmation)
 
-            # Добавление media_group_id в список отправленных
-            if message.media_group_id:
-                sent_media_group_ids.add(message.media_group_id)
     except Exception as e:
         logger.error(f"Error in ask_confirmation: {e}")
 
