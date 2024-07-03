@@ -21,7 +21,7 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 CHANNEL_ID = os.getenv('CHANNEL_ID')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
+client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -67,7 +67,7 @@ async def start_handler(message: Message):
 
 
 async def translate_text(text: str) -> str:
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         model="gpt-4o",
         messages=[
             {"role": "system",
